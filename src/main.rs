@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use backup::{BackupConfig, DEFAULT_CONFIG_PATH};
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 pub const DEFAULT_STATE_PATH: &str = "/var/lib/borg-reminder/state.json";
 pub const DEFAULT_SERVICE_NAME: &str = "borg-reminder-backup.service";
@@ -22,7 +22,7 @@ struct Cli {
     #[arg(long, global = true, default_value = DEFAULT_STATE_PATH)]
     state_path: PathBuf,
 
-    #[arg(long, global = true, default_value = DEFAULT_SERVICE_NAME)]
+    #[arg(long, global = true, default_value = DEFAULT_SERVICE_NAME, value_parser = parse_service_name)]
     service_name: String,
 
     #[command(subcommand)]
@@ -31,16 +31,7 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    Watch {
-        #[arg(long, default_value_t = DEFAULT_POLL_SECONDS)]
-        poll_seconds: u64,
-
-        #[arg(long, default_value_t = DEFAULT_WARN_AFTER_HOURS)]
-        warn_after_hours: u64,
-
-        #[arg(long, default_value_t = DEFAULT_STALE_AFTER_HOURS)]
-        stale_after_hours: u64,
-    },
+    Watch(WatchArgs),
     Trigger,
     Backup {
         #[arg(long, default_value = DEFAULT_CONFIG_PATH)]
@@ -51,101 +42,81 @@ enum Commands {
     Resume,
 }
 
-fn main() -> Result<()> {
-    let Cli {
-        state_path,
-        service_name,
-        command,
-    } = Cli::parse();
-
-    match command {
-        Commands::Watch {
-            poll_seconds,
-            warn_after_hours,
-            stale_after_hours,
-        } => run_watch_command(
-            state_path.as_path(),
-            service_name.as_str(),
-            poll_seconds,
-            warn_after_hours,
-            stale_after_hours,
-        ),
-        Commands::Trigger => run_trigger_command(service_name.as_str()),
-        Commands::Backup { config } => {
-            let config = BackupConfig::load(&config)
-                .with_context(|| format!("failed to load config {}", config.display()))?;
-            backup::run_backup(&config)
-        }
-        Commands::Status => run_status_command(state_path.as_path(), service_name.as_str()),
-        Commands::Pause => run_pause_command(service_name.as_str()),
-        Commands::Resume => run_resume_command(service_name.as_str()),
-    }
-}
-
-fn run_watch_command(
-    state_path: &Path,
-    service_name: &str,
+#[derive(Args, Debug)]
+struct WatchArgs {
+    #[arg(long, default_value_t = DEFAULT_POLL_SECONDS, value_parser = parse_poll_seconds)]
     poll_seconds: u64,
+
+    #[arg(long, default_value_t = DEFAULT_WARN_AFTER_HOURS)]
     warn_after_hours: u64,
+
+    #[arg(long, default_value_t = DEFAULT_STALE_AFTER_HOURS)]
     stale_after_hours: u64,
-) -> Result<()> {
-    validate_service_name(service_name)?;
-    validate_poll_seconds(poll_seconds)?;
-    validate_status_thresholds(warn_after_hours, stale_after_hours)?;
-    watch::run_watch(
-        state_path,
-        service_name,
-        poll_seconds,
-        warn_after_hours,
-        stale_after_hours,
-    )
 }
 
-fn run_trigger_command(service_name: &str) -> Result<()> {
-    validate_service_name(service_name)?;
-    systemd::trigger_backup(service_name)
+fn main() -> Result<()> {
+    Cli::parse().run()
 }
 
-fn run_pause_command(service_name: &str) -> Result<()> {
-    validate_service_name(service_name)?;
-    systemd::pause_backup(service_name)
+impl Cli {
+    fn run(self) -> Result<()> {
+        match self.command {
+            Commands::Watch(args) => {
+                args.validate()?;
+                watch::run_watch(
+                    self.state_path.as_path(),
+                    self.service_name.as_str(),
+                    args.poll_seconds,
+                    args.warn_after_hours,
+                    args.stale_after_hours,
+                )
+            }
+            Commands::Trigger => systemd::trigger_backup(self.service_name.as_str()),
+            Commands::Backup { config } => {
+                let config = BackupConfig::load(&config)
+                    .with_context(|| format!("failed to load config {}", config.display()))?;
+                backup::run_backup(&config)
+            }
+            Commands::Status => {
+                run_status_command(self.state_path.as_path(), self.service_name.as_str())
+            }
+            Commands::Pause => systemd::pause_backup(self.service_name.as_str()),
+            Commands::Resume => systemd::resume_backup(self.service_name.as_str()),
+        }
+    }
 }
 
-fn run_resume_command(service_name: &str) -> Result<()> {
-    validate_service_name(service_name)?;
-    systemd::resume_backup(service_name)
+impl WatchArgs {
+    fn validate(&self) -> Result<()> {
+        if self.warn_after_hours > self.stale_after_hours {
+            bail!("status.warn_after_hours must be less than or equal to status.stale_after_hours");
+        }
+
+        Ok(())
+    }
 }
 
-fn validate_service_name(service_name: &str) -> Result<()> {
+fn parse_service_name(service_name: &str) -> Result<String, String> {
     if service_name.trim().is_empty() {
-        bail!("service_name must not be empty");
+        return Err("service_name must not be empty".to_owned());
     }
 
-    Ok(())
+    Ok(service_name.to_owned())
 }
 
-fn validate_poll_seconds(poll_seconds: u64) -> Result<()> {
+fn parse_poll_seconds(poll_seconds: &str) -> Result<u64, String> {
+    let poll_seconds = poll_seconds
+        .parse::<u64>()
+        .map_err(|error| error.to_string())?;
+
     if poll_seconds == 0 {
-        bail!("status.poll_seconds must be greater than zero");
+        return Err("status.poll_seconds must be greater than zero".to_owned());
     }
 
-    Ok(())
+    Ok(poll_seconds)
 }
 
-fn validate_status_thresholds(warn_after_hours: u64, stale_after_hours: u64) -> Result<()> {
-    if warn_after_hours > stale_after_hours {
-        bail!("status.warn_after_hours must be less than or equal to status.stale_after_hours");
-    }
-
-    Ok(())
-}
-
-fn run_status_command(
-    state_path: &Path,
-    service_name: &str,
-) -> Result<()> {
-    validate_service_name(service_name)?;
-
+fn run_status_command(state_path: &Path, service_name: &str) -> Result<()> {
     let state = state::StateStore::new(state_path.to_path_buf()).load()?;
     let unit = systemd::query_unit_state(service_name)?;
     let derived = watch::derive_status(
@@ -164,17 +135,19 @@ fn run_status_command(
 mod tests {
     use clap::Parser;
 
-    use super::{Cli, Commands, validate_poll_seconds, validate_service_name, validate_status_thresholds};
+    use super::{Cli, Commands, WatchArgs};
 
     #[test]
     fn rejects_empty_service_name() {
-        let error = validate_service_name("   ").unwrap_err();
+        let error =
+            Cli::try_parse_from(["borg-reminder", "--service-name", "   ", "status"]).unwrap_err();
         assert!(error.to_string().contains("service_name must not be empty"));
     }
 
     #[test]
     fn rejects_zero_poll_seconds() {
-        let error = validate_poll_seconds(0).unwrap_err();
+        let error =
+            Cli::try_parse_from(["borg-reminder", "watch", "--poll-seconds", "0"]).unwrap_err();
         assert!(
             error
                 .to_string()
@@ -184,7 +157,13 @@ mod tests {
 
     #[test]
     fn rejects_invalid_status_thresholds() {
-        let error = validate_status_thresholds(25, 24).unwrap_err();
+        let error = WatchArgs {
+            poll_seconds: 1,
+            warn_after_hours: 25,
+            stale_after_hours: 24,
+        }
+        .validate()
+        .unwrap_err();
         assert!(
             error
                 .to_string()
@@ -199,6 +178,12 @@ mod tests {
     }
 
     #[test]
+    fn parses_watch_without_flags() {
+        let cli = Cli::try_parse_from(["borg-reminder", "watch"]).unwrap();
+        assert!(matches!(cli.command, Commands::Watch(_)));
+    }
+
+    #[test]
     fn rejects_removed_status_json_flag() {
         let error = Cli::try_parse_from(["borg-reminder", "status", "--json"]).unwrap_err();
         assert!(error.to_string().contains("--json"));
@@ -206,14 +191,12 @@ mod tests {
 
     #[test]
     fn rejects_removed_status_threshold_flags() {
-        let error =
-            Cli::try_parse_from(["borg-reminder", "status", "--warn-after-hours", "1"])
-                .unwrap_err();
+        let error = Cli::try_parse_from(["borg-reminder", "status", "--warn-after-hours", "1"])
+            .unwrap_err();
         assert!(error.to_string().contains("--warn-after-hours"));
 
-        let error =
-            Cli::try_parse_from(["borg-reminder", "status", "--stale-after-hours", "1"])
-                .unwrap_err();
+        let error = Cli::try_parse_from(["borg-reminder", "status", "--stale-after-hours", "1"])
+            .unwrap_err();
         assert!(error.to_string().contains("--stale-after-hours"));
     }
 }
