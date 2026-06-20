@@ -1,0 +1,7 @@
+[[CustomModule]]
+name = "BorgReminder"
+type = "Button"
+icon = "󰣇"
+command = "borg-reminder trigger"
+listen_cmd = "borg-reminder watch"
+alert = "stale|error"

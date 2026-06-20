@@ -1,0 +1,25 @@
+[general]
+state_path = "/var/lib/borg-reminder/state.json"
+lock_path = "/run/borg-reminder/lock"
+service_name = "borg-reminder-backup.service"
+
+[[profile]]
+name = "root"
+snapper_config = "root"
+repo = "user@host:root-repo"
+passphrase = "root-passphrase"
+archive_prefix = "myhost-root"
+extra_args = ["--stats", "--compression", "zstd"]
+
+[[profile]]
+name = "home"
+snapper_config = "home"
+repo = "user@host:home-repo"
+passphrase = "home-passphrase"
+archive_prefix = "myhost-home"
+extra_args = ["--stats", "--compression", "zstd"]
+
+[status]
+warn_after_hours = 12
+stale_after_hours = 24
+poll_seconds = 15

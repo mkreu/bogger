@@ -1,0 +1,13 @@
+[Unit]
+Description=Borg Reminder Backup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/borg-reminder backup
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
