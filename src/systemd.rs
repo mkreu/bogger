@@ -5,8 +5,6 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 
-use crate::config::Config;
-
 #[derive(Debug, Clone, Serialize)]
 pub struct UnitState {
     pub active_state: String,
@@ -25,27 +23,21 @@ impl UnitState {
     }
 }
 
-pub fn trigger_backup(config: &Config) -> Result<()> {
-    let unit = query_unit_state_optional(config.service_name());
-    if let Some(unit) = unit {
-        if unit.is_active() {
-            return Ok(());
-        }
+pub fn trigger_backup(service_name: &str) -> Result<()> {
+    let unit = query_unit_state(service_name)?;
+    if unit.is_active() {
+        return Ok(());
     }
 
-    run_pkexec_systemctl(&["start", config.service_name()])
+    run_pkexec_systemctl(&["start", service_name])
 }
 
-pub fn pause_backup(config: &Config) -> Result<()> {
-    run_pkexec_systemctl(&["kill", "-s", "STOP", config.service_name()])
+pub fn pause_backup(service_name: &str) -> Result<()> {
+    run_pkexec_systemctl(&["kill", "-s", "STOP", service_name])
 }
 
-pub fn resume_backup(config: &Config) -> Result<()> {
-    run_pkexec_systemctl(&["kill", "-s", "CONT", config.service_name()])
-}
-
-pub fn query_unit_state_optional(service_name: &str) -> Option<UnitState> {
-    query_unit_state(service_name).ok()
+pub fn resume_backup(service_name: &str) -> Result<()> {
+    run_pkexec_systemctl(&["kill", "-s", "CONT", service_name])
 }
 
 pub fn query_unit_state(service_name: &str) -> Result<UnitState> {

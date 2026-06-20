@@ -6,14 +6,24 @@ Small Rust CLI for manually triggering Borg backups from Snapper snapshots and s
 
 - `borg-reminder watch`
 - `borg-reminder trigger`
-- `borg-reminder backup`
+- `borg-reminder backup [--config PATH]`
 - `borg-reminder status --json`
 - `borg-reminder pause`
 - `borg-reminder resume`
 
+Frontend commands do not read the backend config file. They use built-in defaults for the shared state file, service name, and status thresholds, with optional CLI overrides:
+
+- `--state-path /var/lib/borg-reminder/state.json`
+- `--service-name borg-reminder-backup.service`
+
+Command-specific frontend overrides:
+
+- `watch`: `--poll-seconds 15`, `--warn-after-hours 12`, `--stale-after-hours 24`
+- `status --json`: `--warn-after-hours 12`, `--stale-after-hours 24`
+
 ## Config
 
-Install a root-owned config at `/etc/borg-reminder/config.toml`.
+Install a root-owned config at `/etc/borg-reminder/config.toml` for `borg-reminder backup`.
 
 Example:
 
@@ -21,7 +31,6 @@ Example:
 [general]
 state_path = "/var/lib/borg-reminder/state.json"
 lock_path = "/run/borg-reminder/lock"
-service_name = "borg-reminder-backup.service"
 
 [[profile]]
 name = "root"
@@ -38,14 +47,18 @@ repo = "user@host:home-repo"
 passphrase = "home-passphrase"
 archive_prefix = "myhost-home"
 extra_args = ["--stats", "--compression", "zstd"]
-
-[status]
-warn_after_hours = 12
-stale_after_hours = 24
-poll_seconds = 15
 ```
 
 Set permissions to `0600`.
+
+The shared state file is intentionally minimal and only persists bar-relevant state:
+
+- `last_success_at`
+- `last_attempt_at`
+- `started_at`
+- `last_run_result`
+
+Detailed failures and per-archive activity are logged to the journal instead of being stored in the state file.
 
 ## systemd
 

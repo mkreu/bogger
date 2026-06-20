@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
@@ -5,8 +6,7 @@ use anyhow::Result;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde::Serialize;
 
-use crate::config::Config;
-use crate::state::{ArchiveRecord, LastRunResult, SnapshotRecord, State, StateStore};
+use crate::state::{LastRunResult, State, StateStore};
 use crate::systemd::UnitState;
 
 #[derive(Debug, Clone, Serialize)]
@@ -16,10 +16,8 @@ pub struct DerivedStatus {
     pub warning: bool,
     pub last_success_at: Option<DateTime<Utc>>,
     pub last_attempt_at: Option<DateTime<Utc>>,
-    pub last_error: Option<String>,
+    pub started_at: Option<DateTime<Utc>>,
     pub last_run_result: Option<LastRunResult>,
-    pub archives_created: Vec<ArchiveRecord>,
-    pub snapshots_used: Vec<SnapshotRecord>,
     pub unit: Option<UnitState>,
 }
 
@@ -29,14 +27,26 @@ struct WatchOutput<'a> {
     alt: &'a str,
 }
 
-pub fn run_watch(config: &Config) -> Result<()> {
-    let store = StateStore::new(config.state_path().to_path_buf());
+pub fn run_watch(
+    state_path: &Path,
+    service_name: &str,
+    poll_seconds: u64,
+    warn_after_hours: u64,
+    stale_after_hours: u64,
+) -> Result<()> {
+    let store = StateStore::new(state_path.to_path_buf());
     let mut last_output = None;
 
     loop {
         let state = store.load()?;
-        let unit = crate::systemd::query_unit_state_optional(config.service_name());
-        let derived = derive_status(config, &state, unit.as_ref(), Utc::now());
+        let unit = crate::systemd::query_unit_state(service_name)?;
+        let derived = derive_status(
+            &state,
+            Some(&unit),
+            Utc::now(),
+            warn_after_hours,
+            stale_after_hours,
+        );
         let output = serde_json::to_string(&WatchOutput {
             text: &derived.text,
             alt: &derived.alt,
@@ -47,18 +57,19 @@ pub fn run_watch(config: &Config) -> Result<()> {
             last_output = Some(output);
         }
 
-        thread::sleep(Duration::from_secs(config.status.poll_seconds));
+        thread::sleep(Duration::from_secs(poll_seconds));
     }
 }
 
 pub fn derive_status(
-    config: &Config,
     state: &State,
     unit: Option<&UnitState>,
     now: DateTime<Utc>,
+    warn_after_hours: u64,
+    stale_after_hours: u64,
 ) -> DerivedStatus {
-    let warning_cutoff = ChronoDuration::hours(config.status.warn_after_hours as i64);
-    let stale_cutoff = ChronoDuration::hours(config.status.stale_after_hours as i64);
+    let warning_cutoff = ChronoDuration::hours(warn_after_hours as i64);
+    let stale_cutoff = ChronoDuration::hours(stale_after_hours as i64);
 
     let (alt, text) = if let Some(unit) = unit {
         if unit.is_active() {
@@ -85,10 +96,8 @@ pub fn derive_status(
         warning,
         last_success_at: state.last_success_at,
         last_attempt_at: state.last_attempt_at,
-        last_error: state.last_error.clone(),
+        started_at: state.started_at,
         last_run_result: state.last_run_result,
-        archives_created: state.archives_created.clone(),
-        snapshots_used: state.snapshots_used.clone(),
         unit: unit.cloned(),
     }
 }
@@ -140,29 +149,9 @@ pub fn format_elapsed(elapsed: ChronoDuration) -> String {
 mod tests {
     use chrono::{Duration, TimeZone, Utc};
 
-    use crate::config::Config;
     use crate::state::{LastRunResult, State};
 
     use super::{derive_status, format_elapsed};
-
-    fn config() -> Config {
-        toml::from_str(
-            r#"
-                [status]
-                warn_after_hours = 12
-                stale_after_hours = 24
-                poll_seconds = 15
-
-                [[profile]]
-                name = "root"
-                snapper_config = "root"
-                repo = "repo"
-                passphrase = "secret"
-                archive_prefix = "host-root"
-            "#,
-        )
-        .unwrap()
-    }
 
     #[test]
     fn formats_elapsed_time() {
@@ -180,7 +169,7 @@ mod tests {
             ..State::default()
         };
 
-        let derived = derive_status(&config(), &state, None, now);
+        let derived = derive_status(&state, None, now, 12, 24);
         assert_eq!(derived.alt, "stale");
         assert_eq!(derived.text, "30h");
     }
@@ -195,7 +184,7 @@ mod tests {
             ..State::default()
         };
 
-        let derived = derive_status(&config(), &state, None, now);
+        let derived = derive_status(&state, None, now, 12, 24);
         assert_eq!(derived.alt, "error");
         assert_eq!(derived.text, "failed");
     }

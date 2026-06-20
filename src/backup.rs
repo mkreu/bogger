@@ -7,11 +7,112 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use fs2::FileExt;
+use serde::Deserialize;
 
-use crate::config::{Config, ProfileConfig};
-use crate::state::{ArchiveRecord, LastRunResult, SnapshotRecord, StateStore};
+use crate::state::{LastRunResult, StateStore};
 
-pub fn run_backup(config: &Config) -> Result<()> {
+pub const DEFAULT_CONFIG_PATH: &str = "/etc/borg-reminder/config.toml";
+
+const DEFAULT_STATE_PATH: &str = "/var/lib/borg-reminder/state.json";
+const DEFAULT_LOCK_PATH: &str = "/run/borg-reminder/lock";
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BackupConfig {
+    #[serde(default)]
+    general: GeneralConfig,
+    #[serde(default, rename = "profile")]
+    profiles: Vec<ProfileConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct GeneralConfig {
+    state_path: Option<PathBuf>,
+    lock_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ProfileConfig {
+    name: String,
+    snapper_config: String,
+    repo: String,
+    passphrase: String,
+    archive_prefix: String,
+    #[serde(default)]
+    extra_args: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct SnapshotRecord {
+    snapshot_number: u64,
+    snapshot_path: PathBuf,
+}
+
+impl BackupConfig {
+    pub fn load(path: &Path) -> Result<Self> {
+        let contents = fs::read_to_string(path)
+            .with_context(|| format!("failed to read config {}", path.display()))?;
+        let config: Self = toml::from_str(&contents)
+            .with_context(|| format!("failed to parse config {}", path.display()))?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    fn state_path(&self) -> &Path {
+        self.general
+            .state_path
+            .as_deref()
+            .unwrap_or_else(|| Path::new(DEFAULT_STATE_PATH))
+    }
+
+    fn lock_path(&self) -> &Path {
+        self.general
+            .lock_path
+            .as_deref()
+            .unwrap_or_else(|| Path::new(DEFAULT_LOCK_PATH))
+    }
+
+    fn validate(&self) -> Result<()> {
+        if self
+            .general
+            .state_path
+            .as_ref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            bail!("general.state_path must not be empty");
+        }
+
+        if self
+            .general
+            .lock_path
+            .as_ref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            bail!("general.lock_path must not be empty");
+        }
+
+        for profile in &self.profiles {
+            if profile.name.trim().is_empty() {
+                bail!("profile.name must not be empty");
+            }
+            if profile.snapper_config.trim().is_empty() {
+                bail!("profile.snapper_config must not be empty");
+            }
+            if profile.repo.trim().is_empty() {
+                bail!("profile.repo must not be empty");
+            }
+            if profile.passphrase.is_empty() {
+                bail!("profile.passphrase must not be empty");
+            }
+            if profile.archive_prefix.trim().is_empty() {
+                bail!("profile.archive_prefix must not be empty");
+            }
+        }
+
+        Ok(())
+    }
+}
+
+pub fn run_backup(config: &BackupConfig) -> Result<()> {
     if config.profiles.is_empty() {
         bail!("at least one [[profile]] must be configured for backup");
     }
@@ -24,10 +125,6 @@ pub fn run_backup(config: &Config) -> Result<()> {
 
     state.last_attempt_at = Some(started_at);
     state.started_at = Some(started_at);
-    state.active_job_id = Some(job_id);
-    state.last_error = None;
-    state.archives_created.clear();
-    state.snapshots_used.clear();
     store.save(&state)?;
 
     eprintln!("starting borg-reminder backup job pid={job_id}");
@@ -35,27 +132,22 @@ pub fn run_backup(config: &Config) -> Result<()> {
     let result = run_backup_inner(config, started_at);
 
     match result {
-        Ok((snapshot_records, archive_records)) => {
+        Ok(archives_created) => {
             state.last_success_at = Some(Utc::now());
             state.started_at = None;
-            state.active_job_id = None;
-            state.last_error = None;
             state.last_run_result = Some(LastRunResult::Success);
-            state.snapshots_used = snapshot_records;
-            state.archives_created = archive_records;
             store.save(&state)?;
 
             eprintln!(
                 "borg-reminder backup completed successfully archives={}",
-                state.archives_created.len()
+                archives_created
             );
         }
         Err(error) => {
             state.started_at = None;
-            state.active_job_id = None;
-            state.last_error = Some(format!("{error:#}"));
             state.last_run_result = Some(LastRunResult::Error);
             store.save(&state)?;
+            eprintln!("borg-reminder backup failed: {error:#}");
             drop(lock_file);
             return Err(error);
         }
@@ -65,12 +157,8 @@ pub fn run_backup(config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn run_backup_inner(
-    config: &Config,
-    started_at: chrono::DateTime<Utc>,
-) -> Result<(Vec<SnapshotRecord>, Vec<ArchiveRecord>)> {
+fn run_backup_inner(config: &BackupConfig, started_at: chrono::DateTime<Utc>) -> Result<usize> {
     let mut snapshot_records = Vec::with_capacity(config.profiles.len());
-    let mut archive_records = Vec::with_capacity(config.profiles.len());
 
     for profile in &config.profiles {
         let snapshot = discover_latest_snapshot(profile)?;
@@ -84,14 +172,13 @@ fn run_backup_inner(
         run_borg_create(profile, &archive, &snapshot.snapshot_path)?;
 
         snapshot_records.push(snapshot);
-        archive_records.push(ArchiveRecord {
-            profile: profile.name.clone(),
-            archive,
-            repo: profile.repo.clone(),
-        });
+        eprintln!(
+            "created borg archive profile={} repo={} archive={}",
+            profile.name, profile.repo, archive
+        );
     }
 
-    Ok((snapshot_records, archive_records))
+    Ok(snapshot_records.len())
 }
 
 fn acquire_lock(lock_path: &Path) -> Result<File> {
@@ -159,8 +246,6 @@ fn discover_latest_snapshot(profile: &ProfileConfig) -> Result<SnapshotRecord> {
     };
 
     Ok(SnapshotRecord {
-        profile: profile.name.clone(),
-        snapper_config: profile.snapper_config.clone(),
         snapshot_number,
         snapshot_path,
     })
@@ -218,4 +303,59 @@ fn run_borg_create(profile: &ProfileConfig, archive: &str, snapshot_path: &Path)
 
 fn create_archive_name(prefix: &str, timestamp: chrono::DateTime<Utc>) -> String {
     format!("{}-{}", prefix, timestamp.format("%Y-%m-%dT%H-%M-%SZ"))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::{BackupConfig, DEFAULT_LOCK_PATH, DEFAULT_STATE_PATH};
+
+    #[test]
+    fn parses_minimal_backend_config_with_defaults() {
+        let config: BackupConfig = toml::from_str(
+            r#"
+                [[profile]]
+                name = "root"
+                snapper_config = "root"
+                repo = "repo"
+                passphrase = "secret"
+                archive_prefix = "host-root"
+            "#,
+        )
+        .unwrap();
+
+        config.validate().unwrap();
+
+        assert_eq!(config.state_path(), Path::new(DEFAULT_STATE_PATH));
+        assert_eq!(config.lock_path(), Path::new(DEFAULT_LOCK_PATH));
+        assert_eq!(config.profiles.len(), 1);
+    }
+
+    #[test]
+    fn ignores_frontend_only_config_sections() {
+        let config: BackupConfig = toml::from_str(
+            r#"
+                [general]
+                state_path = "/tmp/state.json"
+                service_name = "custom.service"
+
+                [status]
+                warn_after_hours = 12
+                stale_after_hours = 24
+                poll_seconds = 15
+
+                [[profile]]
+                name = "root"
+                snapper_config = "root"
+                repo = "repo"
+                passphrase = "secret"
+                archive_prefix = "host-root"
+            "#,
+        )
+        .unwrap();
+
+        config.validate().unwrap();
+        assert_eq!(config.state_path(), Path::new("/tmp/state.json"));
+    }
 }

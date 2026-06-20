@@ -1,24 +1,17 @@
+use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
-
-use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct State {
     pub last_success_at: Option<DateTime<Utc>>,
     pub last_attempt_at: Option<DateTime<Utc>>,
     pub started_at: Option<DateTime<Utc>>,
-    pub last_error: Option<String>,
     pub last_run_result: Option<LastRunResult>,
-    pub active_job_id: Option<u32>,
-    #[serde(default)]
-    pub archives_created: Vec<ArchiveRecord>,
-    #[serde(default)]
-    pub snapshots_used: Vec<SnapshotRecord>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -26,21 +19,6 @@ pub struct State {
 pub enum LastRunResult {
     Success,
     Error,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArchiveRecord {
-    pub profile: String,
-    pub archive: String,
-    pub repo: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SnapshotRecord {
-    pub profile: String,
-    pub snapper_config: String,
-    pub snapshot_number: u64,
-    pub snapshot_path: PathBuf,
 }
 
 pub struct StateStore {
@@ -99,7 +77,6 @@ mod tests {
     fn round_trips_state() {
         let state = State {
             last_run_result: Some(LastRunResult::Success),
-            last_error: Some("none".into()),
             ..State::default()
         };
 
@@ -107,6 +84,24 @@ mod tests {
         let decoded: State = serde_json::from_str(&json).unwrap();
 
         assert_eq!(decoded.last_run_result, Some(LastRunResult::Success));
-        assert_eq!(decoded.last_error.as_deref(), Some("none"));
+    }
+
+    #[test]
+    fn loads_legacy_state_with_extra_fields() {
+        let decoded: State = serde_json::from_str(
+            r#"{
+                "last_success_at": null,
+                "last_attempt_at": null,
+                "started_at": null,
+                "last_run_result": "error",
+                "last_error": "old detail",
+                "active_job_id": 1234,
+                "archives_created": [],
+                "snapshots_used": []
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(decoded.last_run_result, Some(LastRunResult::Error));
     }
 }
