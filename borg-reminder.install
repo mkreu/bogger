@@ -4,7 +4,9 @@ post_install() {
     1. Install the backend config:
        install -Dm600 /usr/share/doc/borg-reminder/config.toml.example /etc/borg-reminder/config.toml
     2. Edit /etc/borg-reminder/config.toml
-    3. Enable or start the service:
+    3. Create runtime directories now if needed:
+       systemd-tmpfiles --create /usr/lib/tmpfiles.d/borg-reminder.conf
+    4. Enable or start the service:
        systemctl enable --now borg-reminder-backup.service
 EOF
 }

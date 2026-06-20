@@ -6,7 +6,6 @@ pkgbase = borg-reminder
 	arch = x86_64
 	license = unknown
 	makedepends = cargo
-	makedepends = git
 	depends = borg
 	depends = glibc
 	depends = polkit

@@ -74,12 +74,19 @@ That installs:
 - `borg-reminder` to `/usr/bin/borg-reminder`
 - `borg-reminder-backup.service` to `/usr/lib/systemd/system/borg-reminder-backup.service`
 - `config.toml.example` to `/usr/share/doc/borg-reminder/config.toml.example`
+- `borg-reminder.conf` to `/usr/lib/tmpfiles.d/borg-reminder.conf`
 
 Create the backend config before starting the service:
 
 ```bash
 sudo install -Dm600 /usr/share/doc/borg-reminder/config.toml.example /etc/borg-reminder/config.toml
 sudoedit /etc/borg-reminder/config.toml
+```
+
+Create the state and lock directories immediately with:
+
+```bash
+sudo systemd-tmpfiles --create /usr/lib/tmpfiles.d/borg-reminder.conf
 ```
 
 Enable or start the packaged unit with:
