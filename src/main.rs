@@ -8,7 +8,6 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use backup::{BackupConfig, DEFAULT_CONFIG_PATH};
 use clap::{Parser, Subcommand};
-use watch::DerivedStatus;
 
 pub const DEFAULT_STATE_PATH: &str = "/var/lib/borg-reminder/state.json";
 pub const DEFAULT_SERVICE_NAME: &str = "borg-reminder-backup.service";
@@ -47,16 +46,7 @@ enum Commands {
         #[arg(long, default_value = DEFAULT_CONFIG_PATH)]
         config: PathBuf,
     },
-    Status {
-        #[arg(long)]
-        json: bool,
-
-        #[arg(long, default_value_t = DEFAULT_WARN_AFTER_HOURS)]
-        warn_after_hours: u64,
-
-        #[arg(long, default_value_t = DEFAULT_STALE_AFTER_HOURS)]
-        stale_after_hours: u64,
-    },
+    Status,
     Pause,
     Resume,
 }
@@ -86,17 +76,7 @@ fn main() -> Result<()> {
                 .with_context(|| format!("failed to load config {}", config.display()))?;
             backup::run_backup(&config)
         }
-        Commands::Status {
-            json,
-            warn_after_hours,
-            stale_after_hours,
-        } => run_status_command(
-            state_path.as_path(),
-            service_name.as_str(),
-            warn_after_hours,
-            stale_after_hours,
-            json,
-        ),
+        Commands::Status => run_status_command(state_path.as_path(), service_name.as_str()),
         Commands::Pause => run_pause_command(service_name.as_str()),
         Commands::Resume => run_resume_command(service_name.as_str()),
     }
@@ -163,16 +143,8 @@ fn validate_status_thresholds(warn_after_hours: u64, stale_after_hours: u64) -> 
 fn run_status_command(
     state_path: &Path,
     service_name: &str,
-    warn_after_hours: u64,
-    stale_after_hours: u64,
-    json: bool,
 ) -> Result<()> {
     validate_service_name(service_name)?;
-    validate_status_thresholds(warn_after_hours, stale_after_hours)?;
-
-    if !json {
-        bail!("status currently only supports --json");
-    }
 
     let state = state::StateStore::new(state_path.to_path_buf()).load()?;
     let unit = systemd::query_unit_state(service_name)?;
@@ -180,23 +152,19 @@ fn run_status_command(
         &state,
         Some(&unit),
         chrono::Utc::now(),
-        warn_after_hours,
-        stale_after_hours,
+        DEFAULT_WARN_AFTER_HOURS,
+        DEFAULT_STALE_AFTER_HOURS,
     );
 
-    print_status_json(&derived)?;
-    Ok(())
-}
-
-fn print_status_json(derived: &DerivedStatus) -> Result<()> {
-    let output = serde_json::to_string_pretty(derived)?;
-    println!("{output}");
+    println!("{}", derived.alt);
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_poll_seconds, validate_service_name, validate_status_thresholds};
+    use clap::Parser;
+
+    use super::{Cli, Commands, validate_poll_seconds, validate_service_name, validate_status_thresholds};
 
     #[test]
     fn rejects_empty_service_name() {
@@ -222,5 +190,30 @@ mod tests {
                 .to_string()
                 .contains("status.warn_after_hours must be less than or equal")
         );
+    }
+
+    #[test]
+    fn parses_status_without_flags() {
+        let cli = Cli::try_parse_from(["borg-reminder", "status"]).unwrap();
+        assert!(matches!(cli.command, Commands::Status));
+    }
+
+    #[test]
+    fn rejects_removed_status_json_flag() {
+        let error = Cli::try_parse_from(["borg-reminder", "status", "--json"]).unwrap_err();
+        assert!(error.to_string().contains("--json"));
+    }
+
+    #[test]
+    fn rejects_removed_status_threshold_flags() {
+        let error =
+            Cli::try_parse_from(["borg-reminder", "status", "--warn-after-hours", "1"])
+                .unwrap_err();
+        assert!(error.to_string().contains("--warn-after-hours"));
+
+        let error =
+            Cli::try_parse_from(["borg-reminder", "status", "--stale-after-hours", "1"])
+                .unwrap_err();
+        assert!(error.to_string().contains("--stale-after-hours"));
     }
 }

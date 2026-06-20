@@ -7,7 +7,7 @@ Small Rust CLI for manually triggering Borg backups from Snapper snapshots and s
 - `borg-reminder watch`
 - `borg-reminder trigger`
 - `borg-reminder backup [--config PATH]`
-- `borg-reminder status --json`
+- `borg-reminder status`
 - `borg-reminder pause`
 - `borg-reminder resume`
 
@@ -19,7 +19,8 @@ Frontend commands do not read the backend config file. They use built-in default
 Command-specific frontend overrides:
 
 - `watch`: `--poll-seconds 15`, `--warn-after-hours 12`, `--stale-after-hours 24`
-- `status --json`: `--warn-after-hours 12`, `--stale-after-hours 24`
+
+`status` prints the current derived state as a single word such as `idle`, `running`, `paused`, `error`, or `stale`.
 
 ## Config
 
