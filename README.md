@@ -61,7 +61,42 @@ The shared state file is intentionally minimal and only persists bar-relevant st
 
 Detailed failures and per-archive activity are logged to the journal instead of being stored in the state file.
 
+## Arch Linux
+
+Build and install the package from this repository with:
+
+```bash
+makepkg -si
+```
+
+That installs:
+
+- `borg-reminder` to `/usr/bin/borg-reminder`
+- `borg-reminder-backup.service` to `/usr/lib/systemd/system/borg-reminder-backup.service`
+- `config.toml.example` to `/usr/share/doc/borg-reminder/config.toml.example`
+
+Create the backend config before starting the service:
+
+```bash
+sudo install -Dm600 /usr/share/doc/borg-reminder/config.toml.example /etc/borg-reminder/config.toml
+sudoedit /etc/borg-reminder/config.toml
+```
+
+Enable or start the packaged unit with:
+
+```bash
+sudo systemctl enable --now borg-reminder-backup.service
+```
+
+Or run a backup on demand with:
+
+```bash
+sudo systemctl start borg-reminder-backup.service
+```
+
 ## systemd
+
+The Arch package already installs a unit wired to `/usr/bin/borg-reminder`. The example below is for manual installs.
 
 Example unit:
 

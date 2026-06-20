@@ -1,0 +1,17 @@
+pkgbase = borg-reminder
+	pkgdesc = Manual Borg backup helper for ashell
+	pkgver = 0.1.0
+	pkgrel = 1
+	install = borg-reminder.install
+	arch = x86_64
+	license = unknown
+	makedepends = cargo
+	makedepends = git
+	depends = borg
+	depends = glibc
+	depends = polkit
+	depends = snapper
+	depends = systemd
+	options = !debug
+
+pkgname = borg-reminder
