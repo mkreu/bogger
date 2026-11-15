@@ -1,6 +1,6 @@
 [general]
-state_path = "/var/lib/borg-reminder/state.json"
-lock_path = "/run/borg-reminder/lock"
+state_path = "/var/lib/bogger/state.json"
+lock_path = "/run/bogger/lock"
 
 [[profile]]
 name = "root"

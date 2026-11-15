@@ -1,8 +1,8 @@
-pkgbase = borg-reminder
+pkgbase = bogger
 	pkgdesc = Manual Borg backup helper for ashell
 	pkgver = 0.1.0
 	pkgrel = 1
-	install = borg-reminder.install
+	install = bogger.install
 	arch = x86_64
 	license = unknown
 	makedepends = cargo
@@ -13,4 +13,4 @@ pkgbase = borg-reminder
 	depends = systemd
 	options = !debug
 
-pkgname = borg-reminder
+pkgname = bogger

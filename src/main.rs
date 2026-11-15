@@ -9,14 +9,14 @@ use anyhow::{Context, Result, bail};
 use backup::{BackupConfig, DEFAULT_CONFIG_PATH};
 use clap::{Args, Parser, Subcommand};
 
-pub const DEFAULT_STATE_PATH: &str = "/var/lib/borg-reminder/state.json";
-pub const DEFAULT_SERVICE_NAME: &str = "borg-reminder-backup.service";
+pub const DEFAULT_STATE_PATH: &str = "/var/lib/bogger/state.json";
+pub const DEFAULT_SERVICE_NAME: &str = "bogger-backup.service";
 pub const DEFAULT_POLL_SECONDS: u64 = 15;
 pub const DEFAULT_WARN_AFTER_HOURS: u64 = 12;
 pub const DEFAULT_STALE_AFTER_HOURS: u64 = 24;
 
 #[derive(Parser, Debug)]
-#[command(name = "borg-reminder")]
+#[command(name = "bogger")]
 #[command(about = "Manual Borg backup helper for ashell")]
 struct Cli {
     #[arg(long, global = true, default_value = DEFAULT_STATE_PATH)]
@@ -140,14 +140,14 @@ mod tests {
     #[test]
     fn rejects_empty_service_name() {
         let error =
-            Cli::try_parse_from(["borg-reminder", "--service-name", "   ", "status"]).unwrap_err();
+            Cli::try_parse_from(["bogger", "--service-name", "   ", "status"]).unwrap_err();
         assert!(error.to_string().contains("service_name must not be empty"));
     }
 
     #[test]
     fn rejects_zero_poll_seconds() {
         let error =
-            Cli::try_parse_from(["borg-reminder", "watch", "--poll-seconds", "0"]).unwrap_err();
+            Cli::try_parse_from(["bogger", "watch", "--poll-seconds", "0"]).unwrap_err();
         assert!(
             error
                 .to_string()
@@ -173,29 +173,29 @@ mod tests {
 
     #[test]
     fn parses_status_without_flags() {
-        let cli = Cli::try_parse_from(["borg-reminder", "status"]).unwrap();
+        let cli = Cli::try_parse_from(["bogger", "status"]).unwrap();
         assert!(matches!(cli.command, Commands::Status));
     }
 
     #[test]
     fn parses_watch_without_flags() {
-        let cli = Cli::try_parse_from(["borg-reminder", "watch"]).unwrap();
+        let cli = Cli::try_parse_from(["bogger", "watch"]).unwrap();
         assert!(matches!(cli.command, Commands::Watch(_)));
     }
 
     #[test]
     fn rejects_removed_status_json_flag() {
-        let error = Cli::try_parse_from(["borg-reminder", "status", "--json"]).unwrap_err();
+        let error = Cli::try_parse_from(["bogger", "status", "--json"]).unwrap_err();
         assert!(error.to_string().contains("--json"));
     }
 
     #[test]
     fn rejects_removed_status_threshold_flags() {
-        let error = Cli::try_parse_from(["borg-reminder", "status", "--warn-after-hours", "1"])
+        let error = Cli::try_parse_from(["bogger", "status", "--warn-after-hours", "1"])
             .unwrap_err();
         assert!(error.to_string().contains("--warn-after-hours"));
 
-        let error = Cli::try_parse_from(["borg-reminder", "status", "--stale-after-hours", "1"])
+        let error = Cli::try_parse_from(["bogger", "status", "--stale-after-hours", "1"])
             .unwrap_err();
         assert!(error.to_string().contains("--stale-after-hours"));
     }

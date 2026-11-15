@@ -1,11 +1,11 @@
 [Unit]
-Description=Borg Reminder Backup
+Description=Bogger Backup
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=exec
-ExecStart=/usr/local/bin/borg-reminder backup
+ExecStart=/usr/local/bin/bogger backup
 User=root
 Group=root
 

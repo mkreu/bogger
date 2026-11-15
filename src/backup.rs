@@ -11,10 +11,10 @@ use serde::Deserialize;
 
 use crate::state::{LastRunResult, StateStore};
 
-pub const DEFAULT_CONFIG_PATH: &str = "/etc/borg-reminder/config.toml";
+pub const DEFAULT_CONFIG_PATH: &str = "/etc/bogger/config.toml";
 
-const DEFAULT_STATE_PATH: &str = "/var/lib/borg-reminder/state.json";
-const DEFAULT_LOCK_PATH: &str = "/run/borg-reminder/lock";
+const DEFAULT_STATE_PATH: &str = "/var/lib/bogger/state.json";
+const DEFAULT_LOCK_PATH: &str = "/run/bogger/lock";
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BackupConfig {
@@ -127,7 +127,7 @@ pub fn run_backup(config: &BackupConfig) -> Result<()> {
     state.started_at = Some(started_at);
     store.save(&state)?;
 
-    eprintln!("starting borg-reminder backup job pid={job_id}");
+    eprintln!("starting bogger backup job pid={job_id}");
 
     let result = run_backup_inner(config, started_at);
 
@@ -139,7 +139,7 @@ pub fn run_backup(config: &BackupConfig) -> Result<()> {
             store.save(&state)?;
 
             eprintln!(
-                "borg-reminder backup completed successfully archives={}",
+                "bogger backup completed successfully archives={}",
                 archives_created
             );
         }
@@ -147,7 +147,7 @@ pub fn run_backup(config: &BackupConfig) -> Result<()> {
             state.started_at = None;
             state.last_run_result = Some(LastRunResult::Error);
             store.save(&state)?;
-            eprintln!("borg-reminder backup failed: {error:#}");
+            eprintln!("bogger backup failed: {error:#}");
             drop(lock_file);
             return Err(error);
         }

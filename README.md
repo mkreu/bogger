@@ -1,20 +1,20 @@
-# borg-reminder
+# bogger
 
 Small Rust CLI for manually triggering Borg backups from Snapper snapshots and surfacing backup state to `ashell`.
 
 ## Commands
 
-- `borg-reminder watch`
-- `borg-reminder trigger`
-- `borg-reminder backup [--config PATH]`
-- `borg-reminder status`
-- `borg-reminder pause`
-- `borg-reminder resume`
+- `bogger watch`
+- `bogger trigger`
+- `bogger backup [--config PATH]`
+- `bogger status`
+- `bogger pause`
+- `bogger resume`
 
 Frontend commands do not read the backend config file. They use built-in defaults for the shared state file, service name, and status thresholds, with optional CLI overrides:
 
-- `--state-path /var/lib/borg-reminder/state.json`
-- `--service-name borg-reminder-backup.service`
+- `--state-path /var/lib/bogger/state.json`
+- `--service-name bogger-backup.service`
 
 Command-specific frontend overrides:
 
@@ -24,14 +24,14 @@ Command-specific frontend overrides:
 
 ## Config
 
-Install a root-owned config at `/etc/borg-reminder/config.toml` for `borg-reminder backup`.
+Install a root-owned config at `/etc/bogger/config.toml` for `bogger backup`.
 
 Example:
 
 ```toml
 [general]
-state_path = "/var/lib/borg-reminder/state.json"
-lock_path = "/run/borg-reminder/lock"
+state_path = "/var/lib/bogger/state.json"
+lock_path = "/run/bogger/lock"
 
 [[profile]]
 name = "root"
@@ -71,51 +71,51 @@ makepkg -si
 
 That installs:
 
-- `borg-reminder` to `/usr/bin/borg-reminder`
-- `borg-reminder-backup.service` to `/usr/lib/systemd/system/borg-reminder-backup.service`
-- `config.toml.example` to `/usr/share/doc/borg-reminder/config.toml.example`
-- `borg-reminder.conf` to `/usr/lib/tmpfiles.d/borg-reminder.conf`
+- `bogger` to `/usr/bin/bogger`
+- `bogger-backup.service` to `/usr/lib/systemd/system/bogger-backup.service`
+- `config.toml.example` to `/usr/share/doc/bogger/config.toml.example`
+- `bogger.conf` to `/usr/lib/tmpfiles.d/bogger.conf`
 
 Create the backend config before starting the service:
 
 ```bash
-sudo install -Dm600 /usr/share/doc/borg-reminder/config.toml.example /etc/borg-reminder/config.toml
-sudoedit /etc/borg-reminder/config.toml
+sudo install -Dm600 /usr/share/doc/bogger/config.toml.example /etc/bogger/config.toml
+sudoedit /etc/bogger/config.toml
 ```
 
 Create the state and lock directories immediately with:
 
 ```bash
-sudo systemd-tmpfiles --create /usr/lib/tmpfiles.d/borg-reminder.conf
+sudo systemd-tmpfiles --create /usr/lib/tmpfiles.d/bogger.conf
 ```
 
 Enable or start the packaged unit with:
 
 ```bash
-sudo systemctl enable --now borg-reminder-backup.service
+sudo systemctl enable --now bogger-backup.service
 ```
 
 Or run a backup on demand with:
 
 ```bash
-sudo systemctl start borg-reminder-backup.service
+sudo systemctl start bogger-backup.service
 ```
 
 ## systemd
 
-The Arch package already installs a unit wired to `/usr/bin/borg-reminder`. The example below is for manual installs.
+The Arch package already installs a unit wired to `/usr/bin/bogger`. The example below is for manual installs.
 
 Example unit:
 
 ```ini
 [Unit]
-Description=Borg Reminder Backup
+Description=Bogger Backup
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/borg-reminder backup
+ExecStart=/usr/local/bin/bogger backup
 User=root
 Group=root
 
@@ -125,9 +125,9 @@ WantedBy=multi-user.target
 
 Control commands used by the CLI:
 
-- `pkexec systemctl start borg-reminder-backup.service`
-- `pkexec systemctl kill -s STOP borg-reminder-backup.service`
-- `pkexec systemctl kill -s CONT borg-reminder-backup.service`
+- `pkexec systemctl start bogger-backup.service`
+- `pkexec systemctl kill -s STOP bogger-backup.service`
+- `pkexec systemctl kill -s CONT bogger-backup.service`
 
 ## ashell
 
@@ -135,11 +135,11 @@ Example custom module:
 
 ```toml
 [[CustomModule]]
-name = "BorgReminder"
+name = "Bogger"
 type = "Button"
 icon = "󰣇"
-command = "borg-reminder trigger"
-listen_cmd = "borg-reminder watch"
+command = "bogger trigger"
+listen_cmd = "bogger watch"
 alert = "stale|error"
 ```
 

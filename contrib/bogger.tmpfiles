@@ -1,0 +1,2 @@
+d /var/lib/bogger 0755 root root -
+d /run/bogger 0755 root root -
