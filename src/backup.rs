@@ -56,20 +56,20 @@ struct ProfileConfig {
 #[serde(deny_unknown_fields)]
 struct PruneConfig {
     keep_within: Option<String>,
-    keep_last: Option<u32>,
-    keep_minutely: Option<u32>,
-    keep_hourly: Option<u32>,
-    keep_daily: Option<u32>,
-    keep_weekly: Option<u32>,
-    keep_monthly: Option<u32>,
-    keep_13weekly: Option<u32>,
-    keep_3monthly: Option<u32>,
-    keep_yearly: Option<u32>,
+    keep_last: Option<i32>,
+    keep_minutely: Option<i32>,
+    keep_hourly: Option<i32>,
+    keep_daily: Option<i32>,
+    keep_weekly: Option<i32>,
+    keep_monthly: Option<i32>,
+    keep_13weekly: Option<i32>,
+    keep_3monthly: Option<i32>,
+    keep_yearly: Option<i32>,
 }
 
 impl PruneConfig {
     /// Count rules as (config key, borg flag, value).
-    fn count_rules(&self) -> [(&'static str, &'static str, Option<u32>); 9] {
+    fn count_rules(&self) -> [(&'static str, &'static str, Option<i32>); 9] {
         [
             ("keep_last", "--keep-last", self.keep_last),
             ("keep_minutely", "--keep-minutely", self.keep_minutely),
@@ -93,8 +93,9 @@ impl PruneConfig {
         }
 
         for (key, _, value) in self.count_rules() {
-            if value == Some(0) {
-                bail!("profile {profile_name}: prune.{key} must be at least 1");
+            // borg reads a negative count as "no limit"; only -1 is accepted.
+            if value.is_some_and(|value| value == 0 || value < -1) {
+                bail!("profile {profile_name}: prune.{key} must be at least 1, or -1 for no limit");
             }
         }
 
@@ -850,11 +851,27 @@ mod tests {
     }
 
     #[test]
-    fn rejects_zero_prune_count() {
-        let error = validation_error(&format!("{PROFILE}\n[profile.prune]\nkeep_daily = 0\n"));
-        assert!(
-            error.contains("prune.keep_daily must be at least 1"),
-            "{error}"
+    fn rejects_zero_and_other_negative_prune_counts() {
+        for value in ["0", "-2"] {
+            let error = validation_error(&format!(
+                "{PROFILE}\n[profile.prune]\nkeep_daily = {value}\n"
+            ));
+            assert!(
+                error.contains("prune.keep_daily must be at least 1, or -1 for no limit"),
+                "{value}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_minus_one_as_no_limit() {
+        let config = parse(&format!(
+            "{PROFILE}\n[profile.prune]\nkeep_daily = 7\nkeep_yearly = -1\n"
+        ));
+        config.validate().unwrap();
+        assert_eq!(
+            config.profiles[0].prune.as_ref().unwrap().borg_args(),
+            ["--keep-daily", "7", "--keep-yearly", "-1"]
         );
     }
 

@@ -89,7 +89,9 @@ Note: archives made before this layout stored the full snapshot path (`home/.sna
 Pruning is optional. A profile without a `[profile.prune]` table is never pruned. Supported keys, mapped to the borg flag of the same name:
 
 - `keep_within` (string, for example `"2d"`)
-- `keep_last`, `keep_minutely`, `keep_hourly`, `keep_daily`, `keep_weekly`, `keep_monthly`, `keep_13weekly`, `keep_3monthly`, `keep_yearly` (integers, at least 1)
+- `keep_last`, `keep_minutely`, `keep_hourly`, `keep_daily`, `keep_weekly`, `keep_monthly`, `keep_13weekly`, `keep_3monthly`, `keep_yearly` (integers, at least 1, or `-1` for no limit)
+
+A rule that is not set keeps nothing: archives that no rule keeps are deleted. To keep for example all yearly archives forever, set `keep_yearly = -1`.
 
 At least one rule must be set. Unknown keys are an error, so a misspelled rule cannot silently remove a keep rule.
 
