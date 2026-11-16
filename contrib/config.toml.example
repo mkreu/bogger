@@ -1,6 +1,7 @@
 [general]
 state_path = "/var/lib/bogger/state.json"
 lock_path = "/run/bogger/lock"
+mount_dir = "/run/bogger/mnt"
 
 [[profile]]
 name = "root"
@@ -9,6 +10,12 @@ repo = "user@host:root-repo"
 passphrase = "root-passphrase"
 archive_prefix = "myhost-root"
 extra_args = ["--stats", "--compression", "zstd"]
+exclude = ["var/cache", "var/tmp"]
+
+[profile.prune]
+keep_daily = 7
+keep_weekly = 4
+keep_monthly = 6
 
 [[profile]]
 name = "home"
@@ -17,3 +24,10 @@ repo = "user@host:home-repo"
 passphrase = "home-passphrase"
 archive_prefix = "myhost-home"
 extra_args = ["--stats", "--compression", "zstd"]
+exclude = ["*/.cache", "sh:**/node_modules"]
+
+[profile.prune]
+keep_within = "2d"
+keep_daily = 7
+keep_weekly = 4
+keep_monthly = 12

@@ -32,6 +32,7 @@ Example:
 [general]
 state_path = "/var/lib/bogger/state.json"
 lock_path = "/run/bogger/lock"
+mount_dir = "/run/bogger/mnt"
 
 [[profile]]
 name = "root"
@@ -40,6 +41,12 @@ repo = "user@host:root-repo"
 passphrase = "root-passphrase"
 archive_prefix = "myhost-root"
 extra_args = ["--stats", "--compression", "zstd"]
+exclude = ["var/cache", "var/tmp"]
+
+[profile.prune]
+keep_daily = 7
+keep_weekly = 4
+keep_monthly = 6
 
 [[profile]]
 name = "home"
@@ -48,7 +55,56 @@ repo = "user@host:home-repo"
 passphrase = "home-passphrase"
 archive_prefix = "myhost-home"
 extra_args = ["--stats", "--compression", "zstd"]
+exclude = ["*/.cache", "sh:**/node_modules"]
+
+[profile.prune]
+keep_within = "2d"
+keep_daily = 7
+keep_weekly = 4
+keep_monthly = 12
 ```
+
+Set `exclude` before the `[profile.prune]` table of the same profile. TOML adds every key after `[profile.prune]` to the prune table.
+
+### How a profile is backed up
+
+For each profile, `bogger backup`:
+
+1. Selects the newest Snapper snapshot of the profile's subvolume.
+2. Bind-mounts it at `<mount_dir>/<name>` (default `/run/bogger/mnt/<name>`). The path is the same on every run, so the borg files cache can skip unchanged files.
+3. Runs `borg create` inside that mount with `.` as the root. Archived paths are therefore relative to the subvolume root, for example `user/.cache` for `/home/user/.cache`.
+4. Unmounts the snapshot.
+5. If `[profile.prune]` is set: runs `borg prune --list --glob-archives '<archive_prefix>-*'` with the keep rules, then `borg compact`.
+
+All borg output goes to the journal.
+
+Note: archives made before this layout stored the full snapshot path (`home/.snapshots/<n>/snapshot/...`). Restores and diffs against those older archives show the different path layout.
+
+### Exclusion patterns
+
+`exclude` is a list of borg exclude patterns. Each entry is given to `borg create` as `--exclude`. Patterns match paths relative to the subvolume root, without a leading `/`. Borg style prefixes (`fm:`, `sh:`, `re:`, `pp:`, `pf:`) work, see `borg help patterns`. Other flags such as `--exclude-caches` go into `extra_args`.
+
+### Pruning
+
+Pruning is optional. A profile without a `[profile.prune]` table is never pruned. Supported keys, mapped to the borg flag of the same name:
+
+- `keep_within` (string, for example `"2d"`)
+- `keep_last`, `keep_minutely`, `keep_hourly`, `keep_daily`, `keep_weekly`, `keep_monthly`, `keep_13weekly`, `keep_3monthly`, `keep_yearly` (integers, at least 1)
+
+At least one rule must be set. Unknown keys are an error, so a misspelled rule cannot silently remove a keep rule.
+
+Prune only touches archives named `<archive_prefix>-*`. Profiles on the same `repo` must not have overlapping prefixes (equal, or one prefix followed by `-` starting the other); bogger rejects such a config.
+
+To preview a prune by hand:
+
+```bash
+borg prune --dry-run --list --glob-archives 'myhost-home-*' --keep-daily 7 user@host:home-repo
+```
+
+### Failures
+
+- If a snapshot cannot be found or mounted, or `borg create` fails, the job stops and reports `error`.
+- If unmount, prune or compact fails after the archive was created, bogger logs the error and goes on with the next profiles. At the end, the run reports `error`, but `last_success_at` is still updated, because the data is backed up.
 
 Set permissions to `0600`.
 
@@ -118,6 +174,7 @@ Type=oneshot
 ExecStart=/usr/local/bin/bogger backup
 User=root
 Group=root
+PrivateMounts=yes
 
 [Install]
 WantedBy=multi-user.target
