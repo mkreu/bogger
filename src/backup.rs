@@ -21,6 +21,10 @@ const DEFAULT_MOUNT_DIR: &str = "/run/bogger/mnt";
 /// Upper limit for removing stacked leftover mounts from one mount point.
 const MAX_LEFTOVER_UNMOUNTS: usize = 8;
 
+/// Snapper userdata key that marks a snapshot as backed up. The value is the
+/// name of the borg archive that holds the snapshot.
+const SNAPPER_USERDATA_KEY: &str = "bogger";
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct BackupConfig {
     #[serde(default)]
@@ -214,6 +218,14 @@ impl BackupConfig {
                     profile.name
                 );
             }
+            // The archive name goes into Snapper userdata, which uses ',' and
+            // '=' as separators.
+            if profile.archive_prefix.contains([',', '=']) {
+                bail!(
+                    "profile {}: archive_prefix must not contain ',' or '='",
+                    profile.name
+                );
+            }
             if profile
                 .exclude
                 .iter()
@@ -368,6 +380,13 @@ fn run_backup_inner(config: &BackupConfig, started_at: chrono::DateTime<Utc>) ->
             "created borg archive profile={} repo={} archive={}",
             profile.name, profile.repo, archive
         );
+
+        if let Err(error) = run_command(
+            mark_snapshot_command(profile, snapshot.snapshot_number, &archive),
+            "snapper modify",
+        ) {
+            report.maintenance_failed("snapshot mark", profile, error);
+        }
 
         if let Some(prune) = &profile.prune {
             if let Err(error) = run_borg(prune_command(profile, prune), "borg prune", profile) {
@@ -654,6 +673,18 @@ fn compact_command(profile: &ProfileConfig) -> Command {
     command
 }
 
+/// Add `bogger=<archive>` to the userdata of the snapshot. `snapper modify`
+/// keeps the other userdata keys of the snapshot.
+fn mark_snapshot_command(profile: &ProfileConfig, snapshot_number: u64, archive: &str) -> Command {
+    let mut command = Command::new("snapper");
+    command.arg("-c").arg(&profile.snapper_config);
+    command.arg("modify");
+    command.arg("--userdata");
+    command.arg(format!("{SNAPPER_USERDATA_KEY}={archive}"));
+    command.arg(snapshot_number.to_string());
+    command
+}
+
 fn mount_command(source: &Path, target: &Path) -> Command {
     let mut command = Command::new("mount");
     command.arg("--bind").arg(source).arg(target);
@@ -678,7 +709,8 @@ mod tests {
 
     use super::{
         BackupConfig, DEFAULT_LOCK_PATH, DEFAULT_MOUNT_DIR, DEFAULT_STATE_PATH, compact_command,
-        create_command, mount_command, mountinfo_contains, prune_command, umount_command,
+        create_command, mark_snapshot_command, mount_command, mountinfo_contains, prune_command,
+        umount_command,
     };
 
     const PROFILE: &str = r#"
@@ -915,6 +947,17 @@ mod tests {
         assert!(error.contains("glob characters"), "{error}");
     }
 
+    #[test]
+    fn rejects_userdata_separators_in_archive_prefix() {
+        for prefix in ["host,root", "host=root"] {
+            let error = validation_error(&PROFILE.replace("host-root", prefix));
+            assert!(
+                error.contains("must not contain ',' or '='"),
+                "{prefix}: {error}"
+            );
+        }
+    }
+
     fn two_profiles(first_prefix: &str, second_prefix: &str, second_repo: &str) -> String {
         format!(
             r#"
@@ -1020,6 +1063,25 @@ mod tests {
 
         assert_eq!(args(&command), ["compact", "repo"]);
         assert_eq!(passphrase(&command), Some(OsStr::new("secret")));
+    }
+
+    #[test]
+    fn mark_snapshot_command_sets_userdata_with_archive_name() {
+        let config = parse(PROFILE);
+        let command = mark_snapshot_command(&config.profiles[0], 42, "host-root-2026");
+
+        assert_eq!(command.get_program(), "snapper");
+        assert_eq!(
+            args(&command),
+            [
+                "-c",
+                "root",
+                "modify",
+                "--userdata",
+                "bogger=host-root-2026",
+                "42"
+            ]
+        );
     }
 
     #[test]

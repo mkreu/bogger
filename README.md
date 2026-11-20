@@ -74,7 +74,8 @@ For each profile, `bogger backup`:
 2. Bind-mounts it at `<mount_dir>/<name>` (default `/run/bogger/mnt/<name>`). The path is the same on every run, so the borg files cache can skip unchanged files.
 3. Runs `borg create` inside that mount with `.` as the root. Archived paths are therefore relative to the subvolume root, for example `user/.cache` for `/home/user/.cache`.
 4. Unmounts the snapshot.
-5. If `[profile.prune]` is set: runs `borg prune --list --glob-archives '<archive_prefix>-*'` with the keep rules, then `borg compact`.
+5. Marks the snapshot as backed up: runs `snapper -c <snapper_config> modify --userdata bogger=<archive> <number>`. The other userdata of the snapshot stays. `snapper list` shows the mark in the `User Data` column.
+6. If `[profile.prune]` is set: runs `borg prune --list --glob-archives '<archive_prefix>-*'` with the keep rules, then `borg compact`.
 
 All borg output goes to the journal.
 
@@ -95,6 +96,8 @@ A rule that is not set keeps nothing: archives that no rule keeps are deleted. T
 
 At least one rule must be set. Unknown keys are an error, so a misspelled rule cannot silently remove a keep rule.
 
+`archive_prefix` must not contain `,` or `=`, because Snapper userdata uses them as separators.
+
 Prune only touches archives named `<archive_prefix>-*`. Profiles on the same `repo` must not have overlapping prefixes (equal, or one prefix followed by `-` starting the other); bogger rejects such a config.
 
 To preview a prune by hand:
@@ -106,7 +109,7 @@ borg prune --dry-run --list --glob-archives 'myhost-home-*' --keep-daily 7 user@
 ### Failures
 
 - If a snapshot cannot be found or mounted, or `borg create` fails, the job stops and reports `error`.
-- If unmount, prune or compact fails after the archive was created, bogger logs the error and goes on with the next profiles. At the end, the run reports `error`, but `last_success_at` is still updated, because the data is backed up.
+- If unmount, the snapshot mark, prune or compact fails after the archive was created, bogger logs the error and goes on with the next profiles. At the end, the run reports `error`, but `last_success_at` is still updated, because the data is backed up.
 
 Set permissions to `0600`.
 
